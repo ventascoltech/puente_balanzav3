@@ -564,7 +564,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "puente_balanzav2"
+name = "puente_balanzav3"
 version = "0.2.0"
 dependencies = [
  "anyhow",

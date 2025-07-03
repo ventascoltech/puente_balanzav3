@@ -11,6 +11,7 @@ use log::{info, warn};
 use crate::cache::SharedCache;
 use crate::config::RuntimeConfig;
 use crate::command::Comando;
+use crate::serial_utils::sanitize_log_data;
 
 /// Tipos de verificación sobre la caché
 enum CacheCheck {
@@ -84,7 +85,11 @@ fn handle_client(
         };
 
         let comando_str = String::from_utf8_lossy(&buffer[..bytes_read]).trim().to_string();
-        info!("📥 Comando recibido del cliente [{}]: '{}'", peer, comando_str);
+        info!(
+            "📥 Comando recibido del cliente [{}]: '{}'",
+            peer,
+            sanitize_log_data(comando_str.as_bytes())
+        );
 
         match Comando::parse(&comando_str) {
             Some(Comando::Uno) => {
@@ -100,7 +105,11 @@ fn handle_client(
                 manejar_comando_w(&mut stream, &config, &sender, &cache, &peer)?;
             }
             None => {
-                warn!("⚠️ Comando no reconocido del cliente [{}]: '{}'", peer, comando_str);
+                warn!(
+                    "⚠️ Comando no reconocido del cliente [{}]: '{}'",
+                    peer,
+                    sanitize_log_data(comando_str.as_bytes())
+                );
                 let _ = stream.write_all(b"Comando invalido\n");
             }
         }
@@ -127,16 +136,18 @@ fn responder_con_cache(
         CacheCheck::PosteriorA(start, ventana) => {
             guard
                 .get_raw()
-                .filter(|(_, t)| *t >= start && *t <= start + ventana)
+                .filter(|(_, t)| t >= &start && t <= &(start + ventana))
                 .map(|(data, _)| data)
         }
     };
 
     match resultado {
         Some(data) => {
-            stream.write_all(&data).context("Error al enviar datos al cliente")?;
-            let texto = String::from_utf8_lossy(&data);
-            info!("✅ Dato enviado al cliente: {}", texto.trim_end());
+            stream.write_all(data).context("Error al enviar datos al cliente")?;
+            info!(
+                "✅ Dato enviado al cliente: {}",
+                sanitize_log_data(data)
+            );
         }
         None => {
             warn!("⚠️ No se encontró dato válido en caché según el criterio.");
@@ -164,55 +175,61 @@ fn manejar_comando_w(
     let timeout = Duration::from_millis(w_response_timeout_ms);
 
     // Paso 1: Intentar usar caché reciente
-    responder_con_cache(
-        stream,
-        cache,
-        CacheCheck::ValidoDesdePasado(w_duration),
-        b"",
-    )?;
-
     {
         let guard = cache.lock();
-        if let Some((_, t)) = guard.get_raw() {
+        if let Some((data, t)) = guard.get_raw() {
             if t.elapsed() <= w_duration {
-                return Ok(()); // ya se envió dato válido
+                stream.write_all(data)?;
+                info!(
+                    "✅ Dato enviado al cliente: {}",
+                    sanitize_log_data(data)
+                );
+                return Ok(());
+            } else {
+                warn!("⚠️ No se encontró dato válido en caché según el criterio.");
             }
+        } else {
+            warn!("⚠️ No se encontró dato válido en caché según el criterio.");
         }
     }
 
-    // Paso 2: Solicitar dato nuevo
+    // Paso 2: Solicitar nuevo dato
     info!("📤 Cache inválida/vencida. Enviando 'W' a la báscula...");
     sender.send(b"W".to_vec()).context("Error enviando 'W' al serial")?;
 
     let inicio = Instant::now();
-    let mut intentos = 0;
-    let max_intentos = timeout.as_millis() / 10;
+    let mut intento = 0;
+    let mut logueado = false;
+    let max_intentos = (timeout.as_millis() / 50).min(20) as u32;
 
-    loop {
-        responder_con_cache(
-            stream,
-            cache,
-            CacheCheck::PosteriorA(inicio, timeout),
-            b"",
-        )?;
-
+    while intento < max_intentos {
         {
             let guard = cache.lock();
-            if let Some((_, t)) = guard.get_raw() {
+            if let Some((data, t)) = guard.get_raw() {
                 if t >= inicio && t <= inicio + timeout {
-                    return Ok(()); // se envió respuesta reciente
+                    stream.write_all(data)?;
+                    info!(
+                        "✅ Dato enviado al cliente: {}",
+                        sanitize_log_data(data)
+                    );
+                    return Ok(());
                 }
+            }
+
+            if !logueado {
+                warn!("⚠️ No se encontró dato válido en caché según el criterio.");
+                logueado = true;
+            } else if intento == 5 {
+                warn!("⚠️ Aún no se recibe un dato válido después de 5 intentos...");
             }
         }
 
-        intentos += 1;
-        if intentos >= max_intentos {
-            warn!("⏱️ Timeout esperando nuevo dato luego de 'W'");
-            let _ = stream.write_all(b"W_TIMEOUT\n");
-            return Ok(());
-        }
-
-        thread::sleep(Duration::from_millis(10));
+        thread::sleep(Duration::from_millis(50));
+        intento += 1;
     }
+
+    warn!("⏱️ Timeout esperando nuevo dato luego de 'W'");
+    let _ = stream.write_all(b"W_TIMEOUT\n");
+    Ok(())
 }
 

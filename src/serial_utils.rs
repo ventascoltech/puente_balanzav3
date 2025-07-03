@@ -63,13 +63,66 @@ pub fn is_relevant_data(data: &[u8]) -> bool {
 }
 
 
+/// Devuelve una cadena legible seguida del contenido con caracteres escapados,
+/// asegurando que el resultado sea completamente imprimible para journald.
+/// 
+
+
 /// Convierte datos binarios en una representación legible para logs.
 pub fn sanitize_log_data(data: &[u8]) -> String {
     data.iter()
-        .map(|&byte| match byte {
-            b if b.is_ascii_graphic() || b == b' ' => (b as char).to_string(),
-            _ => format!("\\x{:02X}", byte),
+        .filter_map(|&byte| {
+            // Ignorar completamente caracteres molestos como DEL
+            if byte == 0x7F {
+                None
+            } else if byte.is_ascii_graphic() || byte == b' ' {
+                Some((byte as char).to_string())
+            } else if byte == b'\r' {
+                Some("\\r".to_string())
+            } else if byte == b'\n' {
+                Some("\\n".to_string())
+            } else {
+                Some(format!("\\x{:02X}", byte))
+            }
         })
         .collect()
 }
 
+
+
+
+/*
+pub fn sanitize_log_data(data: &[u8]) -> String {
+    let readable: String = data
+        .iter()
+        .filter_map(|&byte| {
+            if byte == 0x7F {
+                None
+            } else if byte.is_ascii_graphic() || byte == b' ' {
+                Some(byte as char)
+            } else if byte == b'\r' {
+                Some('\\');
+                Some('r')
+            } else if byte == b'\n' {
+                Some('\\');
+                Some('n')
+            } else {
+                None
+            }
+        })
+        .collect();
+
+    let escaped: String = data
+        .iter()
+        .map(|&byte| match byte {
+            b if b.is_ascii_graphic() || b == b' ' => (b as char).to_string(),
+            b'\r' => "\\r".to_string(),
+            b'\n' => "\\n".to_string(),
+            _ => format!("\\x{:02X}", byte),
+        })
+        .collect();
+
+    format!("[{}] bytes: {}", readable, escaped)
+}
+
+*/

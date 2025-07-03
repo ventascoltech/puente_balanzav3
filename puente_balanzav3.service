@@ -1,0 +1,20 @@
+[Unit]
+Description=Puente Balanzav3
+After=network.target
+
+[Service]
+ExecStart=/usr/bin/puente_balanzav3 /etc/puente_balanzav3/config.toml
+WorkingDirectory=/etc/puente_balanzav3
+
+User=root
+Group=dialout
+
+StandardOutput=journal
+StandardError=journal
+
+Restart=on-failure
+RestartSec=10s
+
+[Install]
+WantedBy=multi-user.target
+

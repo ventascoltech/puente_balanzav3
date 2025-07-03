@@ -52,8 +52,8 @@ pub fn start_serial_reader(
                 Ok(Err(e)) => {
                     warn!("⚠️ Error al recibir comando: {:?}", e);
                 }
-                Err(e) => {
-                    warn!("❌ Error en selector: {:?}", e);
+                Err(_select_error) => {
+                    // Timeout sin mensaje recibido. No loguear para evitar spam.
                 }
             }
 

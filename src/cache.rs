@@ -1,6 +1,6 @@
 use parking_lot::Mutex;
 use std::sync::Arc;
-use std::time::{Duration, Instant};
+use std::time::{Instant};
 
 use crate::serial_utils::sanitize_log_data;
 
@@ -21,36 +21,11 @@ impl Cache {
         self.data = Some((data, Instant::now()));
     }
 
-    /// Devuelve una referencia a los datos si no han expirado
-    pub fn get_if_valid(&self, duration: Duration) -> Option<&[u8]> {
-        self.data
-            .as_ref()
-            .and_then(|(d, t)| (t.elapsed() <= duration).then(|| d.as_slice()))
-    }
-
-    /// Verifica si los datos actuales siguen siendo válidos
-    pub fn is_valid(&self, duration: Duration) -> bool {
-        self.data
-            .as_ref()
-            .map_or(false, |(_, t)| t.elapsed() <= duration)
-    }
-
     /// Permite acceder a los datos y su timestamp (uso interno controlado)
     pub fn get_raw(&self) -> Option<(&[u8], Instant)> {
         self.data.as_ref().map(|(d, t)| (d.as_slice(), *t))
     }
 
-    /// Retorna una representación de los últimos datos (para debugging/logs)
-    pub fn debug_last_value(&self) -> String {
-        match &self.data {
-            Some((data, t)) => format!(
-                "Último valor: {:?} (hace {:?})",
-                sanitize_log_data(data),
-                t.elapsed()
-            ),
-            None => "Cache vacía".to_string(),
-        }
-    }
 }
 
 impl Default for Cache {
